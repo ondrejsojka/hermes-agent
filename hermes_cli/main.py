@@ -2794,6 +2794,8 @@ def select_provider_and_model(args=None):
         _model_flow_openai_codex(config, current_model)
     elif selected_provider == "xai-oauth":
         _model_flow_xai_oauth(config, current_model, args=args)
+    elif selected_provider == "cursor":
+        _model_flow_cursor(config, current_model, args=args)
     elif selected_provider == "qwen-oauth":
         _model_flow_qwen_oauth(config, current_model)
     elif selected_provider == "minimax-oauth":
@@ -3772,6 +3774,70 @@ def _model_flow_xai_oauth(_config, current_model="", *, args=None):
         _save_model_choice(selected)
         _update_config_for_provider("xai-oauth", base_url)
         print(f"Default model set to: {selected} (via xAI Grok OAuth — SuperGrok / Premium+)")
+    else:
+        print("No change.")
+
+
+def _model_flow_cursor(_config, current_model="", *, args=None):
+    """Cursor subscription provider: ensure logged in, then pick model."""
+    from hermes_cli.auth import (
+        DEFAULT_CURSOR_BASE_URL,
+        PROVIDER_REGISTRY,
+        _login_cursor,
+        _prompt_model_selection,
+        _save_model_choice,
+        _update_config_for_provider,
+        get_cursor_auth_status,
+    )
+    from hermes_cli.models import _PROVIDER_MODELS
+
+    status = get_cursor_auth_status()
+    if status.get("logged_in"):
+        print("  Cursor credentials: ✓")
+        print()
+        print("    1. Use existing credentials")
+        print("    2. Reauthenticate (new OAuth login)")
+        print("    3. Cancel")
+        print()
+        try:
+            choice = input("  Choice [1/2/3]: ").strip()
+        except (KeyboardInterrupt, EOFError):
+            choice = "1"
+
+        if choice == "2":
+            print("Starting a fresh Cursor OAuth login...")
+            print()
+            try:
+                _login_cursor(args or argparse.Namespace(), PROVIDER_REGISTRY["cursor"], force_new_login=True)
+            except SystemExit:
+                print("Login cancelled or failed.")
+                return
+            except Exception as exc:
+                print(f"Login failed: {exc}")
+                return
+        elif choice == "3":
+            return
+    else:
+        print("Not logged into Cursor. Starting login...")
+        print()
+        try:
+            _login_cursor(args or argparse.Namespace(), PROVIDER_REGISTRY["cursor"])
+        except SystemExit:
+            print("Login cancelled or failed.")
+            return
+        except Exception as exc:
+            print(f"Login failed: {exc}")
+            return
+
+    models = list(_PROVIDER_MODELS.get("cursor") or [])
+    selected = _prompt_model_selection(
+        models,
+        current_model=current_model or (models[0] if models else "claude-4.6-opus-high"),
+    )
+    if selected:
+        _save_model_choice(selected)
+        _update_config_for_provider("cursor", DEFAULT_CURSOR_BASE_URL)
+        print(f"Default model set to: {selected} (via Cursor)")
     else:
         print("No change.")
 
@@ -13369,7 +13435,7 @@ def main():
     )
     login_parser.add_argument(
         "--provider",
-        choices=["nous", "openai-codex", "xai-oauth"],
+        choices=["nous", "openai-codex", "xai-oauth", "cursor"],
         default=None,
         help="Provider to authenticate with (default: nous)",
     )
@@ -13415,7 +13481,7 @@ def main():
     )
     logout_parser.add_argument(
         "--provider",
-        choices=["nous", "openai-codex", "xai-oauth", "spotify"],
+        choices=["nous", "openai-codex", "xai-oauth", "cursor", "spotify"],
         default=None,
         help="Provider to log out from (default: active provider)",
     )

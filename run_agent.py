@@ -1874,6 +1874,12 @@ class AIAgent:
         summary["total_tokens"] = cu.total_tokens
         return summary
 
+    def _restore_cursor_runtime(self, runtime: Dict[str, Any]) -> None:
+        """Restore Cursor Agent transport state after a temporary runtime swap."""
+        self._cursor_blob_store = dict(runtime.get("cursor_blob_store", {}) or {})
+        self._cursor_conversation_state = runtime.get("cursor_conversation_state")
+        self._cursor_conversation_id = runtime.get("cursor_conversation_id")
+
     @staticmethod
     def _hook_payload_max_chars() -> int:
         raw = os.getenv("HERMES_PLUGIN_PAYLOAD_MAX_CHARS", "50000")
