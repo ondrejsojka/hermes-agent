@@ -289,9 +289,6 @@ from hermes_cli.subcommands.setup import build_setup_parser
 from hermes_cli.subcommands.postinstall import build_postinstall_parser
 from hermes_cli.subcommands.whatsapp import build_whatsapp_parser
 from hermes_cli.subcommands.slack import build_slack_parser
-from hermes_cli.subcommands.login import build_login_parser
-from hermes_cli.subcommands.logout import build_logout_parser
-from hermes_cli.subcommands.auth import build_auth_parser
 from hermes_cli.subcommands.status import build_status_parser
 from hermes_cli.subcommands.webhook import build_webhook_parser
 from hermes_cli.subcommands.hooks import build_hooks_parser
@@ -13161,7 +13158,6 @@ def main():
         help="Disable TLS verification (testing only)",
     )
     login_parser.set_defaults(func=cmd_login)
-    build_login_parser(subparsers, cmd_login=cmd_login)
 
     # =========================================================================
     # logout command  (parser built in hermes_cli/subcommands/logout.py)
@@ -13275,12 +13271,6 @@ def main():
         "--timeout", type=float, help="Callback/token exchange timeout in seconds"
     )
     auth_parser.set_defaults(func=cmd_auth)
-    build_logout_parser(subparsers, cmd_logout=cmd_logout)
-
-    # =========================================================================
-    # auth command  (parser built in hermes_cli/subcommands/auth.py)
-    # =========================================================================
-    build_auth_parser(subparsers, cmd_auth=cmd_auth)
 
     # =========================================================================
     # status command  (parser built in hermes_cli/subcommands/status.py)
