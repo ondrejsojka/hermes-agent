@@ -3667,7 +3667,7 @@ def _model_flow_cursor(_config, current_model="", *, args=None):
         _update_config_for_provider,
         get_cursor_auth_status,
     )
-    from hermes_cli.models import _PROVIDER_MODELS
+    from hermes_cli.models import provider_model_ids
 
     status = get_cursor_auth_status()
     if status.get("logged_in"):
@@ -3707,7 +3707,7 @@ def _model_flow_cursor(_config, current_model="", *, args=None):
             print(f"Login failed: {exc}")
             return
 
-    models = list(_PROVIDER_MODELS.get("cursor") or [])
+    models = provider_model_ids("cursor")
     selected = _prompt_model_selection(
         models,
         current_model=current_model or (models[0] if models else "claude-4.6-opus-high"),
