@@ -1455,6 +1455,108 @@ class AsyncBedrockAuxiliaryClient:
         self.base_url = sync_wrapper.base_url
 
 
+class _CursorCompletionsAdapter:
+    """OpenAI-client-compatible adapter for the Cursor Agent API."""
+
+    def __init__(self, api_key: str, model: str, base_url: str):
+        self._api_key = api_key
+        self._model = model
+        self._base_url = base_url
+
+    def create(self, **kwargs) -> Any:
+        import uuid
+
+        from agent.cursor.stream_client import run_cursor_agent_turn
+
+        system_prompt: list[str] = []
+        messages: list[dict[str, Any]] = []
+        for msg in kwargs.get("messages") or []:
+            if not isinstance(msg, dict):
+                continue
+            role = msg.get("role")
+            content = msg.get("content", "")
+            if role == "system":
+                if isinstance(content, str) and content.strip():
+                    system_prompt.append(content)
+                continue
+            if role in {"user", "assistant"}:
+                messages.append({"role": role, "content": content})
+
+        model = kwargs.get("model") or self._model
+        response = run_cursor_agent_turn(
+            api_key=self._api_key,
+            base_url=self._base_url,
+            model_id=model,
+            messages=messages,
+            system_prompt=system_prompt or None,
+            tools=None,
+            conversation_id=str(uuid.uuid4()),
+            exec_handlers=None,
+        )
+
+        choice = response.choices[0]
+        message = choice.message
+        usage = getattr(response, "usage", None)
+        return SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    index=0,
+                    message=SimpleNamespace(
+                        role=getattr(message, "role", "assistant"),
+                        content=getattr(message, "content", None),
+                        tool_calls=getattr(message, "tool_calls", None),
+                    ),
+                    finish_reason=getattr(choice, "finish_reason", "stop"),
+                )
+            ],
+            model=getattr(response, "model", model) or model,
+            usage=usage,
+        )
+
+
+class _CursorChatShim:
+    def __init__(self, adapter: _CursorCompletionsAdapter):
+        self.completions = adapter
+
+
+class CursorAuxiliaryClient:
+    """OpenAI-client-compatible wrapper for Cursor Agent API auxiliary calls."""
+
+    def __init__(self, api_key: str, model: str, base_url: str):
+        self.api_key = api_key
+        self.base_url = base_url
+        self._real_client = None
+        adapter = _CursorCompletionsAdapter(api_key, model, base_url)
+        self.chat = _CursorChatShim(adapter)
+
+    def close(self):
+        return None
+
+
+class _AsyncCursorCompletionsAdapter:
+    def __init__(self, sync_adapter: _CursorCompletionsAdapter):
+        self._sync = sync_adapter
+
+    async def create(self, **kwargs) -> Any:
+        import asyncio
+        return await asyncio.to_thread(self._sync.create, **kwargs)
+
+
+class _AsyncCursorChatShim:
+    def __init__(self, adapter: _AsyncCursorCompletionsAdapter):
+        self.completions = adapter
+
+
+class AsyncCursorAuxiliaryClient:
+    def __init__(self, sync_wrapper: "CursorAuxiliaryClient"):
+        sync_adapter = sync_wrapper.chat.completions
+        async_adapter = _AsyncCursorCompletionsAdapter(sync_adapter)
+        self.chat = _AsyncCursorChatShim(async_adapter)
+        self.api_key = sync_wrapper.api_key
+        self.base_url = sync_wrapper.base_url
+        self._real_client = sync_wrapper._real_client
+
+
 def _endpoint_speaks_anthropic_messages(base_url: str) -> bool:
     """True if the endpoint at ``base_url`` speaks the Anthropic Messages
     protocol instead of OpenAI chat.completions.

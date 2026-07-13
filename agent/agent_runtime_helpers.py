@@ -1018,6 +1018,10 @@ def try_recover_primary_transport(
             )
             agent._is_anthropic_oauth = rt["is_anthropic_oauth"]
             agent.client = None
+        elif agent.api_mode == "cursor_agent":
+            agent.client = None
+            if hasattr(agent, "_restore_cursor_runtime"):
+                agent._restore_cursor_runtime(rt)
         else:
             agent.client = agent._create_openai_client(
                 dict(rt["client_kwargs"]),
@@ -1190,6 +1194,10 @@ def restore_primary_runtime(agent) -> bool:
             )
             agent._is_anthropic_oauth = rt["is_anthropic_oauth"]
             agent.client = None
+        elif agent.api_mode == "cursor_agent":
+            agent.client = None
+            if hasattr(agent, "_restore_cursor_runtime"):
+                agent._restore_cursor_runtime(rt)
         else:
             agent.client = agent._create_openai_client(
                 dict(rt["client_kwargs"]),
