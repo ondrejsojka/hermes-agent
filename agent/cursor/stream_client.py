@@ -768,6 +768,21 @@ def run_cursor_agent_turn(
         if pending:
             send_data(pending)
 
+        # Cursor can advertise a very small outbound flow-control window.  Do
+        # not optimistically send the whole Connect envelope before processing
+        # the peer SETTINGS frame: h2 then raises FlowControlError on normal
+        # large prompts (e.g. a restored Telegram history).
+        pending_event_batches: list[list[Any]] = []
+        peer_settings = ssl_sock.recv(65535)
+        if not peer_settings:
+            raise RuntimeError("Cursor closed the HTTP/2 connection before SETTINGS")
+        peer_events = connection.receive_data(peer_settings)
+        pending_event_batches.append(peer_events)
+        with send_lock:
+            pending = connection.data_to_send()
+        if pending:
+            send_data(pending)
+
         stream_id = connection.get_next_available_stream_id()
         headers = [
             (":method", "POST"),
@@ -785,10 +800,51 @@ def run_cursor_agent_turn(
         ]
         with send_lock:
             connection.send_headers(stream_id, headers, end_stream=False)
-            connection.send_data(stream_id, frame_connect_message(request_bytes), end_stream=False)
             pending = connection.data_to_send()
         if pending:
             send_data(pending)
+
+        # A Connect envelope may be larger than Cursor's current HTTP/2
+        # window. HTTP/2 DATA frames can carry slices of one Connect frame, so
+        # send only what the peer currently permits and wait for WINDOW_UPDATE
+        # before sending more.
+        request_frame = frame_connect_message(request_bytes)
+        sent = 0
+        while sent < len(request_frame):
+            with send_lock:
+                window = connection.local_flow_control_window(stream_id)
+                chunk_size = min(
+                    len(request_frame) - sent,
+                    max(0, window),
+                    connection.max_outbound_frame_size,
+                )
+                if chunk_size:
+                    connection.send_data(
+                        stream_id,
+                        request_frame[sent : sent + chunk_size],
+                        end_stream=False,
+                    )
+                    pending = connection.data_to_send()
+                else:
+                    pending = b""
+            if pending:
+                send_data(pending)
+            if chunk_size:
+                sent += chunk_size
+                continue
+
+            # No outbound credit: consume peer frames until it sends a
+            # WINDOW_UPDATE. Preserve all events so an unusually fast Cursor
+            # response is still processed by the normal receive loop below.
+            window_update_data = ssl_sock.recv(65535)
+            if not window_update_data:
+                raise RuntimeError("Cursor closed the HTTP/2 connection while uploading request")
+            window_update_events = connection.receive_data(window_update_data)
+            pending_event_batches.append(window_update_events)
+            with send_lock:
+                pending = connection.data_to_send()
+            if pending:
+                send_data(pending)
 
         heartbeat_thread = threading.Thread(target=heartbeat_loop, daemon=True)
         heartbeat_thread.start()
@@ -805,15 +861,17 @@ def run_cursor_agent_turn(
             if interrupt_event is not None and interrupt_event.is_set():
                 raise InterruptedError("Request was aborted")
 
-            data = ssl_sock.recv(65535)
-            if not data:
-                break
-
-            events = connection.receive_data(data)
-            with send_lock:
-                pending = connection.data_to_send()
-            if pending:
-                send_data(pending)
+            if pending_event_batches:
+                events = pending_event_batches.pop(0)
+            else:
+                data = ssl_sock.recv(65535)
+                if not data:
+                    break
+                events = connection.receive_data(data)
+                with send_lock:
+                    pending = connection.data_to_send()
+                if pending:
+                    send_data(pending)
 
             for event in events:
                 if isinstance(event, h2.events.ResponseReceived):
